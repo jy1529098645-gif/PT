@@ -1,0 +1,41 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Working files
+uploads/
+exports/
+tmp/
+*.log
+
+# Editor
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# RAW files (never commit user photos)
+*.CR2
+*.CR3
+*.NEF
+*.NRW
+*.ARW
+*.SR2
+*.SRF
+*.DNG
+*.RAF
+*.ORF
+*.RW2
+*.PEF
+*.RWL
+*.IIQ
+*.3FR
+*.FFF
+*.MRW
+*.DCR
+*.KDC

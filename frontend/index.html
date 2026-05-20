@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Highlight Recovery — RAW 高光恢复</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>Highlight Recovery</h1>
+      <span class="brand-sub">RAW 高光恢复</span>
+    </div>
+    <div class="meta" id="fileMeta">
+      <span class="muted">尚未载入文件</span>
+    </div>
+    <div class="actions">
+      <label class="btn ghost">
+        <input type="file" id="fileInput" accept=".cr2,.cr3,.nef,.nrw,.arw,.srf,.sr2,.dng,.raf,.orf,.rw2,.pef,.rwl,.iiq,.3fr,.fff,.mrw,.dcr,.kdc" hidden>
+        载入 RAW
+      </label>
+      <button class="btn ghost" id="resetBtn" disabled>重置参数</button>
+      <div class="export-group">
+        <select id="exportFormat" class="select-mini">
+          <option value="jpeg">JPEG</option>
+          <option value="png">PNG</option>
+          <option value="tiff">TIFF (16-bit)</option>
+        </select>
+        <button class="btn primary" id="exportBtn" disabled>导出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="sidebar left">
+      <div class="section-title">
+        <h2>预设</h2>
+        <span class="muted small">点击应用 / 双击仅复制参数</span>
+      </div>
+      <div class="presets" id="presetsList"></div>
+    </aside>
+
+    <section class="canvas">
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-inner">
+          <div class="dropzone-icon"></div>
+          <p class="dropzone-title">拖入 RAW 文件到这里</p>
+          <p class="dropzone-sub muted">或点击右上角 <b>载入 RAW</b>。支持 CR2 / CR3 / NEF / ARW / DNG / RAF / ORF / RW2 / PEF 等</p>
+        </div>
+      </div>
+      <div class="preview-wrap hidden" id="previewWrap">
+        <div class="preview-stage">
+          <img class="preview-img base" id="previewBase" alt="">
+          <img class="preview-img top" id="previewTop" alt="">
+          <div class="compare-handle" id="compareHandle">
+            <div class="handle-bar"></div>
+            <div class="handle-knob"></div>
+          </div>
+        </div>
+        <div class="preview-bar">
+          <label class="compare-toggle">
+            <input type="checkbox" id="compareToggle" checked>
+            <span>对比模式（左：原图 / 右：处理后）</span>
+          </label>
+          <span class="muted small" id="timingInfo"></span>
+        </div>
+      </div>
+      <div class="busy" id="busy">
+        <div class="busy-spinner"></div>
+        <p id="busyText">处理中…</p>
+      </div>
+    </section>
+
+    <aside class="sidebar right">
+      <div class="section-title">
+        <h2>参数</h2>
+        <button class="btn-link" id="randomizeBtn">随机微调</button>
+      </div>
+
+      <div class="param">
+        <label>恢复算法</label>
+        <select id="paramMethod"></select>
+        <p class="muted small" id="methodHint"></p>
+      </div>
+
+      <div class="param">
+        <label>曝光 <span class="value" data-for="exposure">0.00 EV</span></label>
+        <input type="range" id="paramExposure" min="-200" max="200" value="0" data-scale="100">
+      </div>
+
+      <div class="param">
+        <label>高光（负 = 压暗） <span class="value" data-for="highlights">0</span></label>
+        <input type="range" id="paramHighlights" min="-100" max="100" value="0">
+      </div>
+
+      <div class="param">
+        <label>白色（顶端） <span class="value" data-for="whites">0</span></label>
+        <input type="range" id="paramWhites" min="-100" max="100" value="0">
+      </div>
+
+      <div class="param">
+        <label>阴影（提亮） <span class="value" data-for="shadows">0</span></label>
+        <input type="range" id="paramShadows" min="-100" max="100" value="0">
+      </div>
+
+      <hr class="divider">
+
+      <div class="param">
+        <label>阈值（压缩起点） <span class="value" data-for="threshold">75</span></label>
+        <input type="range" id="paramThreshold" min="0" max="100" value="75">
+      </div>
+
+      <div class="param">
+        <label>平滑度（蒙版羽化） <span class="value" data-for="smoothness">20</span></label>
+        <input type="range" id="paramSmoothness" min="0" max="100" value="20">
+      </div>
+
+      <div class="param">
+        <label>色彩保护 <span class="value" data-for="color_preservation">75</span></label>
+        <input type="range" id="paramColorPreservation" min="0" max="100" value="75">
+      </div>
+
+      <div class="param">
+        <label>局部对比 <span class="value" data-for="local_contrast">0</span></label>
+        <input type="range" id="paramLocalContrast" min="-100" max="100" value="0">
+      </div>
+
+      <div class="param">
+        <label>饱和度恢复 <span class="value" data-for="saturation_recovery">0</span></label>
+        <input type="range" id="paramSaturationRecovery" min="0" max="100" value="0">
+      </div>
+
+      <div class="footer-info">
+        <p class="muted small" id="appHint">
+          所有参数均实时预览。导出会重新加载全分辨率 RAW，处理较慢，请耐心。
+        </p>
+      </div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
