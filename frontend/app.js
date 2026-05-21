@@ -25,22 +25,59 @@ const PARAM_GROUPS = {
     { id: 'tint', label: '色调', min: -100, max: 100, def: 0,
       hint: '+ 品红 / − 绿' },
   ],
+  grade: [
+    { id: '_grade_label_sh', type: 'subhead', label: '阴影' },
+    { id: 'grade_shadows_hue', label: '色相', min: 0, max: 360, def: 0 },
+    { id: 'grade_shadows_sat', label: '饱和度', min: -100, max: 100, def: 0 },
+    { id: '_grade_label_md', type: 'subhead', label: '中间调' },
+    { id: 'grade_mids_hue', label: '色相', min: 0, max: 360, def: 0 },
+    { id: 'grade_mids_sat', label: '饱和度', min: -100, max: 100, def: 0 },
+    { id: '_grade_label_hl', type: 'subhead', label: '高光' },
+    { id: 'grade_highlights_hue', label: '色相', min: 0, max: 360, def: 0 },
+    { id: 'grade_highlights_sat', label: '饱和度', min: -100, max: 100, def: 0 },
+    { id: '_grade_label_misc', type: 'subhead', label: '全局' },
+    { id: 'grade_blending', label: '混合', min: 0, max: 100, def: 50,
+      hint: '区域之间的过渡宽度' },
+    { id: 'grade_balance', label: '平衡', min: -100, max: 100, def: 0,
+      hint: '负值偏向阴影，正值偏向高光' },
+  ],
   detail: [
     { id: 'definition', label: '清晰度', min: -100, max: 100, def: 0,
       hint: '中间调局部对比（类似 Lightroom Clarity）。负值给柔焦效果' },
-    { id: 'sharpness', label: '锐度', min: 0, max: 100, def: 0,
+    { id: 'texture', label: '纹理', min: -100, max: 100, def: 0,
+      hint: '中频细节增强（ACR Texture）。负值平滑肤质而不糊化细节' },
+    { id: 'dehaze', label: '去雾', min: -100, max: 100, def: 0,
+      hint: '基于暗通道先验。正值清雾、负值加雾' },
+    { id: 'sharpness', label: '锐度（数量）', min: 0, max: 100, def: 0,
       hint: '边缘锐化（USM 反差掩模）' },
+    { id: '_sharpness_sub_start', type: 'sub_open' },
+    { id: 'sharpness_radius', label: '半径 (px)', min: 0.3, max: 3.0, def: 1.0,
+      step: 0.1, precision: 1 },
+    { id: 'sharpness_detail', label: '细节', min: 0, max: 100, def: 50,
+      hint: '高值放大微小纹理；低值只保留主边缘' },
+    { id: 'sharpness_masking', label: '蒙版', min: 0, max: 100, def: 0,
+      hint: '0 = 整图锐化；100 = 只锐化边缘，平面留干净' },
+    { id: '_sharpness_sub_end', type: 'sub_close' },
     { id: 'noise_reduction', label: '降噪', min: 0, max: 100, def: 0,
-      hint: '预览使用双边滤波；导出用 NLM 高质量算法（慢）' },
+      hint: '预览用双边滤波；导出用 NLM 高质量算法（慢）' },
+  ],
+  effect: [
     { id: 'vignette', label: '晕影', min: -100, max: 100, def: 0,
       hint: '− 暗角（电影感） / + 高光晕' },
+    { id: 'grain', label: '颗粒', min: 0, max: 100, def: 0,
+      hint: '胶片粒子模拟，单色噪点' },
+    { id: '_grain_sub_start', type: 'sub_open' },
+    { id: 'grain_size', label: '颗粒大小', min: 0, max: 100, def: 25 },
+    { id: 'grain_roughness', label: '粗糙度', min: 0, max: 100, def: 50,
+      hint: '高值偏高频；低值偏低频（更柔和）' },
+    { id: '_grain_sub_end', type: 'sub_close' },
   ],
   recovery: [
-    { id: '_method', type: 'select', label: '恢复算法',
+    { id: '_method', type: 'select', label: '高光恢复算法',
       hint: '只在「高光」< 0 时生效。负值越大，压缩越强' },
     { id: 'threshold', label: '阈值（压缩起点）', min: 0, max: 100, def: 75 },
-    { id: 'smoothness', label: '平滑度（蒙版羽化）', min: 0, max: 100, def: 20 },
-    { id: 'color_preservation', label: '色彩保护', min: 0, max: 100, def: 75,
+    { id: 'smoothness', label: '平滑度（蒙版羽化）', min: 0, max: 100, def: 25 },
+    { id: 'color_preservation', label: '色彩保护', min: 0, max: 100, def: 85,
       hint: '高：按比例缩放 RGB 保色；低：逐通道压缩去饱' },
     { id: 'local_contrast', label: '局部对比', min: -100, max: 100, def: 0,
       hint: '仅 detail_preserving / filmic_curve 模式生效' },
@@ -48,6 +85,23 @@ const PARAM_GROUPS = {
       hint: '在已恢复的高光处补充饱和度，避免「灰白」效果' },
   ],
 };
+
+// HSL color mixer config: 8 bands × 3 properties.
+const HSL_BANDS = [
+  { id: 'red',     name: '红',   swatch: '#e74c3c' },
+  { id: 'orange',  name: '橙',   swatch: '#f39c12' },
+  { id: 'yellow',  name: '黄',   swatch: '#f1c40f' },
+  { id: 'green',   name: '绿',   swatch: '#27ae60' },
+  { id: 'aqua',    name: '青',   swatch: '#1abc9c' },
+  { id: 'blue',    name: '蓝',   swatch: '#3498db' },
+  { id: 'purple',  name: '紫',   swatch: '#8e44ad' },
+  { id: 'magenta', name: '品红', swatch: '#e84393' },
+];
+const HSL_PROPS = [
+  { id: 'h', label: '色相', range: 100 },
+  { id: 's', label: '饱和度', range: 100 },
+  { id: 'l', label: '明度', range: 100 },
+];
 
 const MASK_PARAMS = [
   { id: 'exposure', label: '曝光', min: -2.0, max: 2.0, def: 0, step: 0.01, unit: 'EV', precision: 2 },
@@ -113,8 +167,132 @@ function buildParamPanels() {
     const panel = $('panel' + group.charAt(0).toUpperCase() + group.slice(1));
     if (!panel) continue;
     panel.innerHTML = '';
+    let target = panel;
+    let subContainer = null;
     for (const item of items) {
-      panel.appendChild(renderParam(item));
+      if (item.type === 'sub_open') {
+        subContainer = document.createElement('div');
+        subContainer.className = 'sub-params';
+        panel.appendChild(subContainer);
+        target = subContainer;
+      } else if (item.type === 'sub_close') {
+        target = panel;
+        subContainer = null;
+      } else if (item.type === 'subhead') {
+        const h = document.createElement('div');
+        h.className = 'subhead';
+        h.textContent = item.label;
+        target.appendChild(h);
+      } else {
+        target.appendChild(renderParam(item));
+      }
+    }
+  }
+  buildHslPanel();
+}
+
+// ----------------------------------------------------------------------------
+// HSL color mixer panel
+
+function buildHslPanel() {
+  const panel = $('panelHsl');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  const MODES = [
+    { id: 'all', label: '全部' },
+    { id: 'h',   label: '色相' },
+    { id: 's',   label: '饱和度' },
+    { id: 'l',   label: '明度' },
+  ];
+  const modes = document.createElement('div');
+  modes.className = 'hsl-modes';
+  MODES.forEach((m, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'hsl-mode' + (idx === 0 ? ' active' : '');
+    btn.textContent = m.label;
+    btn.dataset.mode = m.id;
+    btn.addEventListener('click', () => {
+      panel.querySelectorAll('.hsl-mode').forEach((b) => b.classList.toggle('active', b === btn));
+      panel.querySelectorAll('.hsl-row .hsl-slider-wrap').forEach((w) => {
+        w.style.display = (m.id === 'all' || w.dataset.prop === m.id) ? '' : 'none';
+      });
+    });
+    modes.appendChild(btn);
+  });
+  panel.appendChild(modes);
+
+  for (const band of HSL_BANDS) {
+    const row = document.createElement('div');
+    row.className = 'hsl-row';
+    row.dataset.color = band.id;
+
+    const swatch = document.createElement('div');
+    swatch.className = 'hsl-swatch';
+    swatch.style.background = band.swatch;
+    row.appendChild(swatch);
+
+    const name = document.createElement('div');
+    name.className = 'hsl-name';
+    name.textContent = band.name;
+    row.appendChild(name);
+
+    for (const prop of HSL_PROPS) {
+      const wrap = document.createElement('div');
+      wrap.className = 'hsl-slider-wrap';
+      wrap.dataset.prop = prop.id;
+
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = -prop.range;
+      input.max = prop.range;
+      input.value = 0;
+      input.dataset.color = band.id;
+      input.dataset.prop = prop.id;
+
+      const val = document.createElement('span');
+      val.className = 'hsl-val';
+      val.textContent = '0';
+
+      input.addEventListener('input', () => {
+        const v = Number(input.value);
+        if (!state.params.hsl) state.params.hsl = {};
+        if (!state.params.hsl[band.id]) state.params.hsl[band.id] = { h: 0, s: 0, l: 0 };
+        state.params.hsl[band.id][prop.id] = v;
+        val.textContent = String(v);
+        clearActivePreset();
+        requestPreview();
+      });
+
+      val.addEventListener('click', () => {
+        input.value = 0;
+        if (!state.params.hsl) state.params.hsl = {};
+        if (!state.params.hsl[band.id]) state.params.hsl[band.id] = { h: 0, s: 0, l: 0 };
+        state.params.hsl[band.id][prop.id] = 0;
+        val.textContent = '0';
+        clearActivePreset();
+        requestPreview();
+      });
+
+      wrap.appendChild(input);
+      wrap.appendChild(val);
+      row.appendChild(wrap);
+    }
+    panel.appendChild(row);
+  }
+}
+
+function syncHslUI() {
+  const hsl = state.params.hsl || {};
+  for (const band of HSL_BANDS) {
+    const bandData = hsl[band.id] || { h: 0, s: 0, l: 0 };
+    for (const prop of HSL_PROPS) {
+      const inp = document.querySelector(
+        `.hsl-row[data-color="${band.id}"] input[data-prop="${prop.id}"]`);
+      if (!inp) continue;
+      const v = Math.round(bandData[prop.id] || 0);
+      inp.value = v;
+      inp.parentElement.querySelector('.hsl-val').textContent = String(v);
     }
   }
 }
@@ -224,7 +402,7 @@ function renderPresets() {
 // Param state I/O
 
 function resetAllParams() {
-  state.params = { ...(state.defaults || {}) };
+  state.params = JSON.parse(JSON.stringify(state.defaults || {}));
   state.params.method = state.params.method || 'luminance_mask';
   state.params.local_masks = state.masks;
   syncParamsToUI();
@@ -249,7 +427,6 @@ function syncParamsToUI() {
     el.value = Math.round(state.params[key] * scale);
     const valEl = document.querySelector(`.value[data-for="${key}"]`);
     if (valEl) {
-      // find the param config to format
       const cfg = findParamConfig(key);
       valEl.textContent = cfg ? formatValue(cfg, state.params[key]) : String(state.params[key]);
     }
@@ -259,6 +436,7 @@ function syncParamsToUI() {
     methodSel.value = state.params.method || 'luminance_mask';
     updateMethodHint(methodSel.parentElement);
   }
+  syncHslUI();
 }
 
 function findParamConfig(key) {
@@ -271,9 +449,20 @@ function findParamConfig(key) {
 }
 
 function applyPreset(preset) {
-  // Start fresh from defaults, then overlay preset params.
-  state.params = { ...(state.defaults || {}) };
-  Object.assign(state.params, preset.params || {});
+  // Start fresh from defaults, then overlay preset params. Deep-copy the
+  // HSL dict so subsequent slider edits don't mutate the defaults reference.
+  state.params = JSON.parse(JSON.stringify(state.defaults || {}));
+  // Shallow merge top-level, then deep-merge `hsl` band-by-band if preset has it.
+  for (const [k, v] of Object.entries(preset.params || {})) {
+    if (k === 'hsl' && v && typeof v === 'object') {
+      state.params.hsl = state.params.hsl || {};
+      for (const [band, sub] of Object.entries(v)) {
+        state.params.hsl[band] = { ...(state.params.hsl[band] || {}), ...sub };
+      }
+    } else {
+      state.params[k] = v;
+    }
+  }
   state.params.method = state.params.method || 'luminance_mask';
   state.params.local_masks = state.masks;
   state.activePresetId = preset.id;

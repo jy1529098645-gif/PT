@@ -181,16 +181,158 @@ def vibrance(rgb: np.ndarray, amount: float) -> np.ndarray:
 # Detail (operate in sRGB space, post tone-mapping)
 # ----------------------------------------------------------------------------
 
-def sharpness(rgb_u8: np.ndarray, amount: float) -> np.ndarray:
-    """Unsharp mask sharpening. Operates on uint8."""
+def sharpness(
+    rgb_u8: np.ndarray,
+    amount: float,
+    *,
+    radius: float = 1.0,
+    detail: float = 50.0,
+    masking: float = 0.0,
+) -> np.ndarray:
+    """Unsharp mask sharpening with ACR-style Amount / Radius / Detail / Masking.
+
+    - ``amount`` (0-100): overall sharpening strength.
+    - ``radius`` (0.5-3): Gaussian σ in pixels for the high-pass.
+    - ``detail`` (0-100): suppresses sharpening of low-amplitude detail at low
+      values (cleaner) and amplifies it at high values (more "texture").
+    - ``masking`` (0-100): builds an edge mask so flat areas stay unsharpened.
+    """
     if amount < 1.0:
         return rgb_u8
     a = amount / 100.0
-    blurred = cv2.GaussianBlur(rgb_u8, (0, 0), sigmaX=1.0)
+    r = float(np.clip(radius, 0.3, 5.0))
+    d = float(np.clip(detail, 0.0, 100.0)) / 100.0
+    m = float(np.clip(masking, 0.0, 100.0)) / 100.0
+
     fimg = rgb_u8.astype(np.float32)
-    fblur = blurred.astype(np.float32)
-    sharpened = fimg + a * 1.4 * (fimg - fblur)
+    blurred = cv2.GaussianBlur(rgb_u8, (0, 0), sigmaX=r).astype(np.float32)
+    detail_signal = fimg - blurred
+
+    # Soft-knee detail suppression: amplitudes below a noise floor are damped.
+    if d < 0.99:
+        threshold = (1.0 - d) * 8.0  # uint8 units; at detail=0 we squash up to 8 levels
+        s_sign = np.sign(detail_signal)
+        s_abs = np.abs(detail_signal)
+        s_abs = np.maximum(0.0, s_abs - threshold)
+        detail_signal = s_sign * s_abs
+
+    # Edge mask from a Sobel-magnitude built off the luminance.
+    if m > 0.001:
+        gray = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2GRAY)
+        sob_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        sob_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        edge = np.hypot(sob_x, sob_y)
+        edge = cv2.GaussianBlur(edge, (0, 0), sigmaX=1.5)
+        edge /= max(edge.max(), 1e-3)
+        edge = edge ** (0.4 + (1.0 - m) * 1.6)  # masking pushes the curve up
+        edge_mask = (m * edge + (1.0 - m))[..., None]
+        detail_signal = detail_signal * edge_mask
+
+    sharpened = fimg + a * 1.4 * detail_signal
     return np.clip(sharpened, 0.0, 255.0).astype(np.uint8)
+
+
+def texture(rgb_u8: np.ndarray, amount: float) -> np.ndarray:
+    """Mid-frequency detail enhancement (ACR "Texture").
+
+    Between Sharpness (very small radius) and Definition (large radius).
+    Negative values give a smoothing / skin-soothing effect.
+    """
+    if abs(amount) < 1.0:
+        return rgb_u8
+    a = amount / 100.0
+    fimg = rgb_u8.astype(np.float32)
+    blurred = cv2.GaussianBlur(rgb_u8, (0, 0), sigmaX=3.0).astype(np.float32)
+    detail_signal = fimg - blurred
+    # Suppress the noise floor regardless of sign of amount.
+    s_sign = np.sign(detail_signal)
+    s_abs = np.maximum(np.abs(detail_signal) - 2.0, 0.0)
+    detail_signal = s_sign * s_abs
+    out = fimg + a * 1.0 * detail_signal
+    return np.clip(out, 0.0, 255.0).astype(np.uint8)
+
+
+def dehaze(rgb: np.ndarray, amount: float) -> np.ndarray:
+    """Atmospheric haze removal via simplified dark-channel-prior.
+
+    Positive ``amount`` clears haze (boosts global contrast where the dark
+    channel is high); negative ``amount`` adds haze (lifts blacks toward
+    the estimated atmospheric light). Operates on float32 RGB in [0, 1].
+
+    The classic He-Sun-Tang algorithm:
+        dark_ch(x) = min_c min_{y in patch(x)} I_c(y)
+        A         ≈ value of I at the brightest dark-channel pixels
+        t(x)      = 1 - ω * dark_ch_blur(x)
+        J(x)      = (I(x) - A) / max(t(x), t_floor) + A
+    """
+    if abs(amount) < 1.0:
+        return rgb
+    a = amount / 100.0
+    rgb = np.clip(rgb, 0.0, 1.0).astype(np.float32)
+
+    if a > 0:
+        # Erode with a small kernel for the patch minimum.
+        h, w = rgb.shape[:2]
+        ksize = max(7, min(15, min(h, w) // 60))
+        kernel = np.ones((ksize, ksize), dtype=np.uint8)
+        dark_ch = cv2.erode(rgb.min(axis=-1), kernel)
+        # Atmospheric light estimate: average of pixels in the top 0.1% of dark_ch.
+        flat_d = dark_ch.flatten()
+        n_top = max(1, int(flat_d.size * 0.001))
+        idx_top = np.argpartition(flat_d, -n_top)[-n_top:]
+        atm = rgb.reshape(-1, 3)[idx_top].mean(axis=0)
+        atm = np.maximum(atm, 0.4)  # avoid spuriously low A
+        # Smoothed transmission
+        omega = 0.85 * a
+        t = 1.0 - omega * cv2.GaussianBlur(dark_ch, (0, 0), sigmaX=15.0)
+        t = np.maximum(t, 0.15)
+        dehazed = (rgb - atm[None, None, :]) / t[..., None] + atm[None, None, :]
+        out = a * dehazed + (1.0 - a) * rgb
+    else:
+        # Anti-dehaze: blend toward a "haze color" (light gray with slight blue).
+        haze = np.array([0.78, 0.80, 0.82], dtype=np.float32)
+        amt = -a
+        out = rgb * (1.0 - 0.4 * amt) + haze[None, None, :] * (0.4 * amt)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def grain(
+    rgb_u8: np.ndarray,
+    amount: float,
+    *,
+    size: float = 25.0,
+    roughness: float = 50.0,
+) -> np.ndarray:
+    """Add film-style monochromatic grain.
+
+    - ``amount``: 0-100, strength of the grain.
+    - ``size``: 0-100, grain cell size. Larger = chunkier.
+    - ``roughness``: 0-100, ratio of mid/high frequency. Higher = more contrast.
+    """
+    if amount < 1.0:
+        return rgb_u8
+    a = amount / 100.0
+    s = float(np.clip(size, 0.0, 100.0)) / 100.0
+    r = float(np.clip(roughness, 0.0, 100.0)) / 100.0
+
+    h, w = rgb_u8.shape[:2]
+    # Grain scale: smaller image -> smaller cells; size slider scales between 1-4px σ
+    sigma = 0.6 + s * 3.0
+
+    # Two-octave noise: a low and a mid frequency added in proportion to roughness.
+    rng = np.random.default_rng(2026)
+    noise_lo = rng.standard_normal((h, w)).astype(np.float32)
+    noise_lo = cv2.GaussianBlur(noise_lo, (0, 0), sigmaX=sigma * 1.6)
+    noise_hi = rng.standard_normal((h, w)).astype(np.float32)
+    noise_hi = cv2.GaussianBlur(noise_hi, (0, 0), sigmaX=sigma * 0.6)
+    noise = (1.0 - r) * noise_lo + r * noise_hi
+
+    # Renormalize to unit std (varies after blur)
+    noise_std = max(float(noise.std()), 1e-3)
+    noise /= noise_std
+
+    out = rgb_u8.astype(np.float32) + (a * 20.0) * noise[..., None]
+    return np.clip(out, 0.0, 255.0).astype(np.uint8)
 
 
 def definition(rgb_u8: np.ndarray, amount: float) -> np.ndarray:

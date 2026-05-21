@@ -28,31 +28,39 @@ from typing import Any, Dict, List
 def default_params() -> Dict[str, Any]:
     """Identity defaults — pipeline becomes a near no-op."""
     return {
-        "rotation": 0,
-        "flip_h": False,
-        "flip_v": False,
+        # Geometry
+        "rotation": 0, "flip_h": False, "flip_v": False,
+        # Tonal
         "exposure": 0.0,
-        "highlights": 0,
-        "whites": 0,
-        "shadows": 0,
-        "black_point": 0,
-        "brightness": 0,
-        "brilliance": 0,
-        "contrast": 0,
-        "warmth": 0,
-        "tint": 0,
-        "saturation": 0,
-        "vibrance": 0,
-        "definition": 0,
-        "sharpness": 0,
+        "highlights": 0, "whites": 0, "shadows": 0, "black_point": 0,
+        "brightness": 0, "brilliance": 0, "contrast": 0,
+        # WB
+        "warmth": 0, "tint": 0,
+        # Dehaze
+        "dehaze": 0,
+        # Color
+        "saturation": 0, "vibrance": 0,
+        # Detail
+        "definition": 0, "texture": 0,
+        "sharpness": 0, "sharpness_radius": 1.0,
+        "sharpness_detail": 50, "sharpness_masking": 0,
         "noise_reduction": 0,
+        # Effects
         "vignette": 0,
-        "threshold": 75,
-        "smoothness": 25,
-        "color_preservation": 85,
-        "local_contrast": 0,
-        "saturation_recovery": 0,
+        "grain": 0, "grain_size": 25, "grain_roughness": 50,
+        # Recovery internals
+        "threshold": 75, "smoothness": 25, "color_preservation": 85,
+        "local_contrast": 0, "saturation_recovery": 0,
         "method": "luminance_mask",
+        # HSL mixer (8 colors × hue/sat/lum)
+        "hsl": {b: {"h": 0, "s": 0, "l": 0}
+                for b in ("red","orange","yellow","green","aqua","blue","purple","magenta")},
+        # Color grading
+        "grade_shadows_hue": 0, "grade_shadows_sat": 0,
+        "grade_mids_hue": 0,    "grade_mids_sat": 0,
+        "grade_highlights_hue": 0, "grade_highlights_sat": 0,
+        "grade_blending": 50, "grade_balance": 0,
+        # Local masks
         "local_masks": [],
     }
 
@@ -229,6 +237,75 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "definition": 5,
             "sharpness": 10,
             "color_preservation": 85,
+            "method": "luminance_mask",
+        },
+    },
+
+    # =========================================================================
+    # New ACR-style presets that lean on the HSL mixer / color grading.
+    # =========================================================================
+    "teal_orange": {
+        "name": "青橙电影",
+        "description": "经典青橙调：阴影偏青，高光偏橙。好莱坞预告片风格。",
+        "params": {
+            "highlights": -30, "shadows": 12, "contrast": 8,
+            "vibrance": 10, "warmth": 6,
+            "grade_shadows_hue": 200, "grade_shadows_sat": 22,
+            "grade_highlights_hue": 30, "grade_highlights_sat": 18,
+            "grade_blending": 60, "grade_balance": 10,
+            "method": "luminance_mask", "color_preservation": 85,
+        },
+    },
+    "skin_warm": {
+        "name": "暖肤人像",
+        "description": "ACR HSL 调肤色：橙色偏黄、明度抬升，背景绿叶降饱和。",
+        "params": {
+            "highlights": -25, "shadows": 6,
+            "vibrance": 8, "warmth": 4,
+            "definition": -6, "sharpness": 14,
+            "color_preservation": 92, "method": "hsl_compression",
+            "hsl": {
+                "red":     {"h": -4, "s": -8, "l": 4},
+                "orange":  {"h":  6, "s": -10, "l": 8},
+                "yellow":  {"h":  0, "s": -20, "l": 0},
+                "green":   {"h":  0, "s": -25, "l": -4},
+                "aqua":    {"h":  0, "s": 0, "l": 0},
+                "blue":    {"h":  0, "s": -5, "l": 0},
+                "purple":  {"h":  0, "s": 0, "l": 0},
+                "magenta": {"h":  0, "s": -8, "l": 0},
+            },
+        },
+    },
+    "moody_film": {
+        "name": "暗调胶片",
+        "description": "胶片低对比 + 颗粒 + 阴影染蓝。冷调氛围。",
+        "params": {
+            "highlights": -38, "whites": -15, "shadows": 8,
+            "contrast": -8, "warmth": -8, "saturation": -8,
+            "vibrance": 12, "vignette": -15,
+            "grain": 22, "grain_size": 30, "grain_roughness": 55,
+            "grade_shadows_hue": 220, "grade_shadows_sat": 20,
+            "grade_blending": 55, "grade_balance": -10,
+            "method": "filmic_curve",
+        },
+    },
+    "landscape_punchy": {
+        "name": "风光浓郁",
+        "description": "HSL 加深天空蓝 + 树叶绿，加适度 dehaze 找回远景。",
+        "params": {
+            "highlights": -42, "shadows": 12, "whites": -10,
+            "vibrance": 15, "definition": 10, "dehaze": 20,
+            "color_preservation": 88,
+            "hsl": {
+                "red":     {"h": 0, "s": 0, "l": 0},
+                "orange":  {"h": 0, "s": 0, "l": 0},
+                "yellow":  {"h": -3, "s": 6, "l": 0},
+                "green":   {"h": -4, "s": 12, "l": -4},
+                "aqua":    {"h":  2, "s": 12, "l": -4},
+                "blue":    {"h":  4, "s": 18, "l": -8},
+                "purple":  {"h": 0, "s": 0, "l": 0},
+                "magenta": {"h": 0, "s": 0, "l": 0},
+            },
             "method": "luminance_mask",
         },
     },

@@ -1,23 +1,27 @@
-"""Full processing pipeline.
+"""Full processing pipeline (Camera Raw-style ordering).
 
-Stages run in an order chosen so each operator works in the domain
-where it's mathematically well-defined.
-
-Linear-space (pre-gamma):
-    1.  Global exposure
-    2.  Highlight recovery (one of six pro algorithms)
-    3.  Whites endpoint
-    4.  Shadows / Black point
-    5.  Warmth / Tint (white balance)
-    6.  Local masks (radial / linear gradient)
-sRGB-encoded (post-gamma, perceptual):
-    7.  Brightness / Brilliance
-    8.  Contrast
-    9.  Vibrance / Saturation
-    10. Definition (clarity)
-    11. Noise reduction
-    12. Sharpness
-    13. Vignette
+Stages, in order:
+    Linear-space:
+      1.  Geometry (rotation / flip)
+      2.  Exposure
+      3.  Highlight recovery (one of six algorithms)
+      4.  Whites / Shadows / Black point
+      5.  Warmth / Tint (white balance)
+      6.  Dehaze
+      7.  Local masks (radial / linear gradient)
+    sRGB-encoded:
+      8.  Brightness / Brilliance
+      9.  Contrast
+      10. HSL Color Mixer (8 hue bands × hue/sat/lum)
+      11. Color Grading (3-range tonal tint)
+      12. Vibrance / Saturation
+    8-bit perceptual:
+      13. Definition (clarity)
+      14. Texture
+      15. Noise reduction
+      16. Sharpening (Amount / Radius / Detail / Masking)
+      17. Vignette
+      18. Grain
 """
 from __future__ import annotations
 
@@ -29,13 +33,14 @@ import cv2
 import numpy as np
 
 from . import adjustments as adj
+from . import color_mixer
 from . import masks
 from . import recovery
 
 
 @dataclass
 class ProcessResult:
-    image_srgb_u8: np.ndarray  # HxWx3 uint8 sRGB
+    image_srgb_u8: np.ndarray
     timing_ms: float
 
 
@@ -44,38 +49,38 @@ class ProcessResult:
 # ----------------------------------------------------------------------------
 
 _DEFAULTS: Dict[str, float] = {
-    # Geometry (apply first, in the loaded frame)
-    "rotation": 0.0,        # 0 / 90 / 180 / 270, clockwise
-    "flip_h": 0.0,          # truthy = mirror left/right
-    "flip_v": 0.0,          # truthy = mirror top/bottom
+    # Geometry
+    "rotation": 0.0, "flip_h": 0.0, "flip_v": 0.0,
     # Linear-space tonal
     "exposure": 0.0,
-    "highlights": 0.0,
-    "whites": 0.0,
-    "shadows": 0.0,
-    "black_point": 0.0,
+    "highlights": 0.0, "whites": 0.0, "shadows": 0.0, "black_point": 0.0,
     # WB
-    "warmth": 0.0,
-    "tint": 0.0,
+    "warmth": 0.0, "tint": 0.0,
+    # Dehaze
+    "dehaze": 0.0,
     # sRGB-space tonal
-    "brightness": 0.0,
-    "brilliance": 0.0,
-    "contrast": 0.0,
+    "brightness": 0.0, "brilliance": 0.0, "contrast": 0.0,
     # Color
-    "saturation": 0.0,
-    "vibrance": 0.0,
+    "saturation": 0.0, "vibrance": 0.0,
     # Detail
     "definition": 0.0,
+    "texture": 0.0,
     "sharpness": 0.0,
+    "sharpness_radius": 1.0,
+    "sharpness_detail": 50.0,
+    "sharpness_masking": 0.0,
     "noise_reduction": 0.0,
     # Effects
     "vignette": 0.0,
-    # Recovery-method specific
-    "threshold": 75.0,
-    "smoothness": 20.0,
-    "color_preservation": 75.0,
-    "local_contrast": 0.0,
-    "saturation_recovery": 0.0,
+    "grain": 0.0, "grain_size": 25.0, "grain_roughness": 50.0,
+    # Recovery method specific
+    "threshold": 75.0, "smoothness": 25.0, "color_preservation": 85.0,
+    "local_contrast": 0.0, "saturation_recovery": 0.0,
+    # Color grading (3-range × hue/sat + blending + balance)
+    "grade_shadows_hue": 0.0, "grade_shadows_sat": 0.0,
+    "grade_mids_hue":    0.0, "grade_mids_sat":    0.0,
+    "grade_highlights_hue": 0.0, "grade_highlights_sat": 0.0,
+    "grade_blending": 50.0, "grade_balance": 0.0,
 }
 
 
@@ -97,7 +102,6 @@ _ROT_K = {0: 0, 90: -1, 180: 2, 270: 1}
 
 
 def _apply_transform(img: np.ndarray, rotation: float, flip_h: float, flip_v: float) -> np.ndarray:
-    """Apply 90°-quanta rotation + optional H/V mirror. Returns contiguous array."""
     rot = int(round(rotation)) % 360
     k = _ROT_K.get(rot, 0)
     if k != 0:
@@ -130,9 +134,7 @@ def _linear_to_srgb(x: np.ndarray) -> np.ndarray:
 # ----------------------------------------------------------------------------
 
 def _apply_recovery(img: np.ndarray, p: Dict[str, float], method_key: str) -> np.ndarray:
-    """If user pulled highlights down, run the chosen recovery algorithm."""
     if p["highlights"] >= -1.0:
-        # Positive (boost) - small additive lift in highlight area
         if p["highlights"] > 1.0:
             L = adj.luma(np.clip(img, 0.0, 1.0))
             t = float(np.clip(p["threshold"] / 100.0, 0.05, 0.99))
@@ -173,20 +175,7 @@ def _apply_recovery(img: np.ndarray, p: Dict[str, float], method_key: str) -> np
 # Local masks
 # ----------------------------------------------------------------------------
 
-# Adjustments allowed inside a local mask. Keep this short and intentional —
-# local color-temp / sat / contrast / exposure covers 95% of real edits.
-_LOCAL_ADJUSTMENTS = (
-    "exposure", "highlights", "shadows", "saturation", "contrast", "warmth", "tint",
-)
-
-
 def _apply_local_masks(linear_img: np.ndarray, local_specs: List[Dict[str, Any]]) -> np.ndarray:
-    """Apply each local mask. Operates in linear space.
-
-    For each mask we build an adjusted copy of the (current) image and
-    blend by the mask. Masks compose left-to-right so later masks see
-    earlier masks' edits, which matches Lightroom behavior.
-    """
     if not local_specs:
         return linear_img
 
@@ -207,16 +196,13 @@ def _apply_local_masks(linear_img: np.ndarray, local_specs: List[Dict[str, Any]]
 
         hl = float(params.get("highlights", 0.0))
         if abs(hl) > 1.0:
-            # Local highlight: reuse global tone curve in luminance space
             strength = float(min(1.0, abs(hl) / 100.0))
-            sign = -1.0 if hl < 0 else 1.0
-            if sign < 0:
+            if hl < 0:
                 edited = recovery.luminance_mask(
                     edited, strength=strength, threshold=0.55,
                     feather=18.0, color_preservation=0.85,
                 )
             else:
-                # Positive: gentle lift via additive
                 Ll = adj.luma(np.clip(edited, 0.0, 1.0))
                 lift_m = np.clip((Ll - 0.55) / 0.45, 0.0, 1.0)[..., None]
                 edited = edited + lift_m * (hl / 100.0) * 0.18 * (1.0 - edited)
@@ -236,9 +222,6 @@ def _apply_local_masks(linear_img: np.ndarray, local_specs: List[Dict[str, Any]]
 
         co = float(params.get("contrast", 0.0))
         if abs(co) > 1.0:
-            # Contrast is best in sRGB but we're in linear here.
-            # Approximate by reusing the sRGB curve on linear data — close
-            # enough for localized adjustments.
             edited = adj.contrast(np.clip(edited, 0.0, 1.0), co)
 
         m3 = m[..., None]
@@ -263,42 +246,57 @@ def process(
         method_key = "luminance_mask"
 
     local_specs = masks.collect_masks(params.get("local_masks") or [])
+    hsl_params = color_mixer.coerce_hsl_params(params.get("hsl") or {})
 
     p = _norm(params)
-    # Sanitize: clip negatives, replace any NaN/Inf with safe values so the
-    # rest of the pipeline doesn't have to defend against them.
     img = linear_rgb.astype(np.float32, copy=False)
     if not np.all(np.isfinite(img)):
         img = np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
     img = np.clip(img, 0.0, None)
 
-    # --- Geometry: rotation / mirror (must come first; downstream stages
-    #     and local masks all operate in this user-facing frame) -----------
+    # 1. Geometry
     img = _apply_transform(img, p["rotation"], p["flip_h"], p["flip_v"])
 
-    # --- Linear-space stages -----------------------------------------------
+    # 2-5. Linear-space tonal
     img = adj.exposure(img, p["exposure"])
     img = _apply_recovery(img, p, method_key)
     img = adj.whites(img, p["whites"])
     img = adj.shadows(img, p["shadows"])
     img = adj.black_point(img, p["black_point"])
     img = adj.warmth_tint(img, p["warmth"], p["tint"])
+
+    # 6. Dehaze (still in linear)
+    img = adj.dehaze(img, p["dehaze"])
+
+    # 7. Local masks
     img = _apply_local_masks(img, local_specs)
     img = np.clip(img, 0.0, 1.0)
 
-    # --- sRGB encode --------------------------------------------------------
+    # → sRGB encode
     srgb = _linear_to_srgb(img)
 
-    # --- Perceptual-space tonal --------------------------------------------
+    # 8-9. Brightness / Brilliance / Contrast
     srgb = adj.brightness(srgb, p["brightness"])
     srgb = adj.brilliance(srgb, p["brilliance"])
     srgb = adj.contrast(srgb, p["contrast"])
 
-    # --- Color --------------------------------------------------------------
+    # 10. HSL Color Mixer (operates on float, uses HSV internally)
+    srgb = color_mixer.hsl_mixer(srgb, hsl_params)
+
+    # 11. Color Grading (3-range tint)
+    srgb = color_mixer.color_grading(
+        srgb,
+        shadows_hue=p["grade_shadows_hue"], shadows_sat=p["grade_shadows_sat"],
+        mids_hue=p["grade_mids_hue"], mids_sat=p["grade_mids_sat"],
+        highlights_hue=p["grade_highlights_hue"], highlights_sat=p["grade_highlights_sat"],
+        blending=p["grade_blending"], balance=p["grade_balance"],
+    )
+
+    # 12. Vibrance / Saturation
     srgb = adj.vibrance(srgb, p["vibrance"])
     srgb = adj.saturation(srgb, p["saturation"])
 
-    # --- In-mask saturation recovery (legacy from highlight-recovery flow) --
+    # Legacy: in-mask saturation recovery (only when highlight recovery is engaged)
     if p["saturation_recovery"] > 1.0 and method_key != "hsl_compression" \
             and p["highlights"] < -1.0:
         threshold = float(np.clip(p["threshold"] / 100.0, 0.05, 0.99))
@@ -310,18 +308,30 @@ def process(
         srgb = srgb + m[..., None] * sr * 0.5 * (srgb - L)
         srgb = np.clip(srgb, 0.0, 1.0)
 
-    # --- Convert to uint8 for the remaining detail / effect stages ---------
+    # → uint8 for the remaining detail / effect stages
     out_u8 = (np.clip(srgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
+    # 13-16. Detail
     out_u8 = adj.definition(out_u8, p["definition"])
+    out_u8 = adj.texture(out_u8, p["texture"])
     out_u8 = adj.noise_reduction(out_u8, p["noise_reduction"],
                                  high_quality=high_quality_denoise)
-    out_u8 = adj.sharpness(out_u8, p["sharpness"])
-    # Vignette ideally lives in linear; for speed we approximate in sRGB
+    out_u8 = adj.sharpness(
+        out_u8, p["sharpness"],
+        radius=p["sharpness_radius"],
+        detail=p["sharpness_detail"],
+        masking=p["sharpness_masking"],
+    )
+
+    # 17. Vignette
     if abs(p["vignette"]) > 1.0:
         out_f = out_u8.astype(np.float32) / 255.0
         out_f = adj.vignette(out_f, p["vignette"])
         out_u8 = (np.clip(out_f, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+    # 18. Grain
+    out_u8 = adj.grain(out_u8, p["grain"], size=p["grain_size"],
+                       roughness=p["grain_roughness"])
 
     return ProcessResult(image_srgb_u8=out_u8, timing_ms=(time.perf_counter() - t0) * 1000.0)
 
