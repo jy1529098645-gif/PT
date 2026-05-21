@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Highlight Recovery — RAW 高光恢复</title>
+  <title>Highlight Recovery — RAW 高光恢复 / 局部曝光</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
     <div class="brand">
       <span class="brand-mark"></span>
       <h1>Highlight Recovery</h1>
-      <span class="brand-sub">RAW 高光恢复</span>
+      <span class="brand-sub">RAW · 局部曝光 · iPhone 风格调整</span>
     </div>
     <div class="meta" id="fileMeta">
       <span class="muted">尚未载入文件</span>
@@ -37,7 +37,7 @@
     <aside class="sidebar left">
       <div class="section-title">
         <h2>预设</h2>
-        <span class="muted small">点击应用 / 双击仅复制参数</span>
+        <span class="muted small">单击应用 · 双击仅复制参数</span>
       </div>
       <div class="presets" id="presetsList"></div>
     </aside>
@@ -51,13 +51,14 @@
         </div>
       </div>
       <div class="preview-wrap hidden" id="previewWrap">
-        <div class="preview-stage">
+        <div class="preview-stage" id="previewStage">
           <img class="preview-img base" id="previewBase" alt="">
           <img class="preview-img top" id="previewTop" alt="">
           <div class="compare-handle" id="compareHandle">
             <div class="handle-bar"></div>
             <div class="handle-knob"></div>
           </div>
+          <div class="mask-overlay" id="maskOverlay"></div>
         </div>
         <div class="preview-bar">
           <label class="compare-toggle">
@@ -74,68 +75,28 @@
     </section>
 
     <aside class="sidebar right">
-      <div class="section-title">
-        <h2>参数</h2>
-        <button class="btn-link" id="randomizeBtn">随机微调</button>
-      </div>
+      <nav class="tabs" id="paramTabs">
+        <button class="tab active" data-tab="basic">基础</button>
+        <button class="tab" data-tab="color">色彩</button>
+        <button class="tab" data-tab="detail">细节</button>
+        <button class="tab" data-tab="recovery">高光算法</button>
+        <button class="tab" data-tab="local">局部</button>
+      </nav>
 
-      <div class="param">
-        <label>恢复算法</label>
-        <select id="paramMethod"></select>
-        <p class="muted small" id="methodHint"></p>
-      </div>
+      <div class="tab-panel active" data-panel="basic" id="panelBasic"></div>
+      <div class="tab-panel" data-panel="color" id="panelColor"></div>
+      <div class="tab-panel" data-panel="detail" id="panelDetail"></div>
+      <div class="tab-panel" data-panel="recovery" id="panelRecovery"></div>
 
-      <div class="param">
-        <label>曝光 <span class="value" data-for="exposure">0.00 EV</span></label>
-        <input type="range" id="paramExposure" min="-200" max="200" value="0" data-scale="100">
-      </div>
-
-      <div class="param">
-        <label>高光（负 = 压暗） <span class="value" data-for="highlights">0</span></label>
-        <input type="range" id="paramHighlights" min="-100" max="100" value="0">
-      </div>
-
-      <div class="param">
-        <label>白色（顶端） <span class="value" data-for="whites">0</span></label>
-        <input type="range" id="paramWhites" min="-100" max="100" value="0">
-      </div>
-
-      <div class="param">
-        <label>阴影（提亮） <span class="value" data-for="shadows">0</span></label>
-        <input type="range" id="paramShadows" min="-100" max="100" value="0">
-      </div>
-
-      <hr class="divider">
-
-      <div class="param">
-        <label>阈值（压缩起点） <span class="value" data-for="threshold">75</span></label>
-        <input type="range" id="paramThreshold" min="0" max="100" value="75">
-      </div>
-
-      <div class="param">
-        <label>平滑度（蒙版羽化） <span class="value" data-for="smoothness">20</span></label>
-        <input type="range" id="paramSmoothness" min="0" max="100" value="20">
-      </div>
-
-      <div class="param">
-        <label>色彩保护 <span class="value" data-for="color_preservation">75</span></label>
-        <input type="range" id="paramColorPreservation" min="0" max="100" value="75">
-      </div>
-
-      <div class="param">
-        <label>局部对比 <span class="value" data-for="local_contrast">0</span></label>
-        <input type="range" id="paramLocalContrast" min="-100" max="100" value="0">
-      </div>
-
-      <div class="param">
-        <label>饱和度恢复 <span class="value" data-for="saturation_recovery">0</span></label>
-        <input type="range" id="paramSaturationRecovery" min="0" max="100" value="0">
-      </div>
-
-      <div class="footer-info">
-        <p class="muted small" id="appHint">
-          所有参数均实时预览。导出会重新加载全分辨率 RAW，处理较慢，请耐心。
-        </p>
+      <div class="tab-panel local" data-panel="local" id="panelLocal">
+        <div class="local-actions">
+          <button class="btn-mini" id="addRadialBtn">+ 径向蒙版</button>
+          <button class="btn-mini" id="addLinearBtn">+ 渐变蒙版</button>
+        </div>
+        <div class="local-help muted small">
+          单击预览区可调整蒙版位置。每个蒙版内可独立调整曝光、高光、阴影、对比度、饱和度、色温色调。
+        </div>
+        <div class="mask-list" id="maskList"></div>
       </div>
     </aside>
   </main>
