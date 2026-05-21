@@ -217,17 +217,24 @@ def definition(rgb_u8: np.ndarray, amount: float) -> np.ndarray:
 
 
 def noise_reduction(rgb_u8: np.ndarray, amount: float, *, high_quality: bool = False) -> np.ndarray:
-    """Denoise. Bilateral for fast preview, NLM for export."""
+    """Denoise. Bilateral for fast preview, NLM for export.
+
+    OpenCV's fastNlMeansDenoisingColored converts the input to LAB
+    internally to separate luminance from chroma, and that conversion
+    assumes BGR channel order. Bilateral filter is order-agnostic so
+    we can pass RGB directly.
+    """
     if amount < 1.0:
         return rgb_u8
     a = amount / 100.0
     if high_quality:
         h_strength = a * 12.0 + 3.0
-        # Color & luminance strengths can differ but use the same here for simplicity
-        return cv2.fastNlMeansDenoisingColored(
-            rgb_u8, None, h=h_strength, hColor=h_strength,
+        bgr = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2BGR)
+        bgr = cv2.fastNlMeansDenoisingColored(
+            bgr, None, h=h_strength, hColor=h_strength,
             templateWindowSize=7, searchWindowSize=21,
         )
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     sigma_color = a * 32.0 + 6.0
     sigma_space = a * 6.0 + 4.0
     return cv2.bilateralFilter(rgb_u8, d=-1, sigmaColor=float(sigma_color), sigmaSpace=float(sigma_space))

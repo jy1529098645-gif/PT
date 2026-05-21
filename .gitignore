@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+smoke_test.py
 .venv/
 venv/
 .env

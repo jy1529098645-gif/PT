@@ -239,7 +239,12 @@ def process(
     local_specs = masks.collect_masks(params.get("local_masks") or [])
 
     p = _norm(params)
-    img = np.clip(linear_rgb.astype(np.float32, copy=False), 0.0, None)
+    # Sanitize: clip negatives, replace any NaN/Inf with safe values so the
+    # rest of the pipeline doesn't have to defend against them.
+    img = linear_rgb.astype(np.float32, copy=False)
+    if not np.all(np.isfinite(img)):
+        img = np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
+    img = np.clip(img, 0.0, None)
 
     # --- Linear-space stages -----------------------------------------------
     img = adj.exposure(img, p["exposure"])

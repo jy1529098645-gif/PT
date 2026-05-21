@@ -500,11 +500,7 @@ function drawRadial(overlay, rect, m, selected) {
   ell.style.width = (rxPx * 2) + 'px';
   ell.style.height = (ryPx * 2) + 'px';
   ell.addEventListener('mousedown', (e) => {
-    if (!selected) {
-      e.preventDefault();
-      selectMask(m.id);
-      return;
-    }
+    if (!selected) selectMaskNoRender(m.id);
     startDrag(e, 'move', m);
   });
   ell.addEventListener('click', (e) => { e.stopPropagation(); });
@@ -559,11 +555,23 @@ function drawLinear(overlay, rect, m, selected) {
     dot.style.left = hx + 'px';
     dot.style.top = hy + 'px';
     dot.addEventListener('mousedown', (e) => {
-      if (!selected) { e.preventDefault(); selectMask(m.id); return; }
+      if (!selected) selectMaskNoRender(m.id);
       startDrag(e, mode, m);
     });
     overlay.appendChild(dot);
   }
+}
+
+// Select a mask and update the sidebar list, but don't tear down the
+// overlay DOM — the caller is mid-mousedown on an overlay element and
+// needs it to stay alive long enough for the drag to start cleanly.
+function selectMaskNoRender(id) {
+  if (state.selectedMaskId === id) return;
+  state.selectedMaskId = id;
+  renderMaskList();
+  // Schedule the overlay re-render for after the current event loop tick
+  // so the original element survives the mousedown.
+  setTimeout(renderMaskOverlay, 0);
 }
 
 // Drag handling
@@ -690,6 +698,7 @@ async function renderBaseImage() {
 }
 
 let previewDebounce = null;
+let previewSeq = 0;
 function requestPreview() {
   if (!state.sessionId) return;
   if (previewDebounce) clearTimeout(previewDebounce);
@@ -697,31 +706,38 @@ function requestPreview() {
 }
 
 async function actuallyPreview() {
-  if (state.previewInFlight) { state.previewQueued = true; return; }
-  state.previewInFlight = true;
+  // Abort any in-flight request — the user has new params they want to see.
+  if (state.previewInFlight) {
+    try { state.previewInFlight.abort(); } catch {}
+    state.previewInFlight = null;
+  }
+  const mySeq = ++previewSeq;
+  const ctl = new AbortController();
+  state.previewInFlight = ctl;
   try {
-    // Strip out _internal keys (anything starting with _) before sending.
     const params = { ...state.params };
     params.local_masks = state.masks;
     const resp = await fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: state.sessionId, params }),
+      signal: ctl.signal,
     });
+    if (mySeq !== previewSeq) return; // a newer request has started — drop result
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const ms = resp.headers.get('X-Process-Ms');
     if (ms) $('timingInfo').textContent = `处理耗时 ${Math.round(Number(ms))} ms`;
     const blob = await resp.blob();
+    if (mySeq !== previewSeq) return;
     if (state.topUrl) URL.revokeObjectURL(state.topUrl);
     state.topUrl = URL.createObjectURL(blob);
     const top = $('previewTop');
     top.src = state.topUrl;
     top.onload = () => updateComparePosition();
   } catch (e) {
-    toast('预览失败：' + e.message, 'error');
+    if (e.name !== 'AbortError') toast('预览失败：' + e.message, 'error');
   } finally {
-    state.previewInFlight = false;
-    if (state.previewQueued) { state.previewQueued = false; actuallyPreview(); }
+    if (state.previewInFlight === ctl) state.previewInFlight = null;
   }
 }
 
