@@ -228,6 +228,17 @@ function resetAllParams() {
   state.params.method = state.params.method || 'luminance_mask';
   state.params.local_masks = state.masks;
   syncParamsToUI();
+  syncTransformButtons();
+}
+
+function syncTransformButtons() {
+  const h = !!state.params.flip_h, v = !!state.params.flip_v;
+  $('flipHBtn')?.classList.toggle('active', h);
+  $('flipVBtn')?.classList.toggle('active', v);
+  // No "active" indicator for rotation (it's a 4-state cycle); a tooltip suffices.
+  const rot = Number(state.params.rotation || 0);
+  const btn = $('rotateRightBtn');
+  if (btn) btn.title = `向右旋转 90°（当前累计 ${rot}°）`;
 }
 
 function syncParamsToUI() {
@@ -626,6 +637,80 @@ function startDrag(e, mode, mask) {
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ============================================================================
+// Geometry transforms (rotation + flip) — apply to image AND existing masks.
+// All rotations are clockwise.
+
+async function applyRotation(deltaCW) {
+  transformMasks({ rotation: deltaCW });
+  state.params.rotation = (((state.params.rotation || 0) + deltaCW) % 360 + 360) % 360;
+  syncTransformButtons();
+  await afterTransform();
+}
+
+async function applyFlip(axis) {
+  transformMasks({ flip: axis });
+  if (axis === 'H') state.params.flip_h = !state.params.flip_h;
+  else state.params.flip_v = !state.params.flip_v;
+  syncTransformButtons();
+  await afterTransform();
+}
+
+async function afterTransform() {
+  // Re-render the BEFORE image with the same geometry so the compare slider
+  // still works (otherwise a 90°-rotated AFTER would overlap an un-rotated
+  // BEFORE of mismatched dimensions).
+  try { await renderBaseImage(); } catch {}
+  renderMaskOverlay();
+  requestPreview();
+}
+
+function transformMasks(op) {
+  for (const m of state.masks) {
+    if (op.rotation !== undefined) {
+      const r = ((op.rotation % 360) + 360) % 360;
+      if (r === 90) {
+        // CW 90°: (x, y) -> (1-y, x)
+        if (m.type === 'radial') {
+          const { cx, cy, rx, ry } = m;
+          m.cx = 1 - cy; m.cy = cx;
+          m.rx = ry; m.ry = rx;
+        } else {
+          const { x1, y1, x2, y2 } = m;
+          m.x1 = 1 - y1; m.y1 = x1;
+          m.x2 = 1 - y2; m.y2 = x2;
+        }
+      } else if (r === 180) {
+        if (m.type === 'radial') {
+          m.cx = 1 - m.cx; m.cy = 1 - m.cy;
+        } else {
+          m.x1 = 1 - m.x1; m.y1 = 1 - m.y1;
+          m.x2 = 1 - m.x2; m.y2 = 1 - m.y2;
+        }
+      } else if (r === 270) {
+        // CW 270° (= CCW 90°): (x, y) -> (y, 1-x)
+        if (m.type === 'radial') {
+          const { cx, cy, rx, ry } = m;
+          m.cx = cy; m.cy = 1 - cx;
+          m.rx = ry; m.ry = rx;
+        } else {
+          const { x1, y1, x2, y2 } = m;
+          m.x1 = y1; m.y1 = 1 - x1;
+          m.x2 = y2; m.y2 = 1 - x2;
+        }
+      }
+    }
+    if (op.flip === 'H') {
+      if (m.type === 'radial') m.cx = 1 - m.cx;
+      else { m.x1 = 1 - m.x1; m.x2 = 1 - m.x2; }
+    }
+    if (op.flip === 'V') {
+      if (m.type === 'radial') m.cy = 1 - m.cy;
+      else { m.y1 = 1 - m.y1; m.y2 = 1 - m.y2; }
+    }
+  }
+}
+
+// ============================================================================
 // Tabs
 
 function bindTabs() {
@@ -659,6 +744,9 @@ async function handleUpload(file) {
     $('previewWrap').classList.remove('hidden');
     $('exportBtn').disabled = false;
     $('resetBtn').disabled = false;
+    for (const id of ['rotateLeftBtn', 'rotateRightBtn', 'flipHBtn', 'flipVBtn']) {
+      $(id).disabled = false;
+    }
 
     // First render: base = defaults, top = current params.
     await renderBaseImage();
@@ -685,10 +773,19 @@ function showMeta(m) {
 
 async function renderBaseImage() {
   if (!state.defaults) return;
+  // The "before" image must share the user's current geometry so the
+  // before/after compare overlay aligns. Otherwise a rotated AFTER would
+  // mismatch a landscape BEFORE.
+  const baseParams = {
+    ...state.defaults,
+    rotation: state.params.rotation || 0,
+    flip_h: state.params.flip_h || false,
+    flip_v: state.params.flip_v || false,
+  };
   const resp = await fetch('/api/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: state.sessionId, params: state.defaults }),
+    body: JSON.stringify({ session_id: state.sessionId, params: baseParams }),
   });
   if (!resp.ok) throw new Error('base preview failed');
   const blob = await resp.blob();
@@ -865,6 +962,11 @@ function bindEvents() {
 
   $('addRadialBtn').addEventListener('click', () => createMask('radial'));
   $('addLinearBtn').addEventListener('click', () => createMask('linear'));
+
+  $('rotateLeftBtn').addEventListener('click', () => applyRotation(-90));
+  $('rotateRightBtn').addEventListener('click', () => applyRotation(90));
+  $('flipHBtn').addEventListener('click', () => applyFlip('H'));
+  $('flipVBtn').addEventListener('click', () => applyFlip('V'));
 
   // Re-render mask overlay on window resize (image bounding box changes)
   window.addEventListener('resize', () => setTimeout(renderMaskOverlay, 0));

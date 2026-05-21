@@ -44,6 +44,10 @@ class ProcessResult:
 # ----------------------------------------------------------------------------
 
 _DEFAULTS: Dict[str, float] = {
+    # Geometry (apply first, in the loaded frame)
+    "rotation": 0.0,        # 0 / 90 / 180 / 270, clockwise
+    "flip_h": 0.0,          # truthy = mirror left/right
+    "flip_v": 0.0,          # truthy = mirror top/bottom
     # Linear-space tonal
     "exposure": 0.0,
     "highlights": 0.0,
@@ -83,6 +87,28 @@ def _norm(p: Dict[str, Any]) -> Dict[str, float]:
         except (TypeError, ValueError):
             out[k] = float(default)
     return out
+
+
+# ----------------------------------------------------------------------------
+# Geometry transform
+# ----------------------------------------------------------------------------
+
+_ROT_K = {0: 0, 90: -1, 180: 2, 270: 1}
+
+
+def _apply_transform(img: np.ndarray, rotation: float, flip_h: float, flip_v: float) -> np.ndarray:
+    """Apply 90°-quanta rotation + optional H/V mirror. Returns contiguous array."""
+    rot = int(round(rotation)) % 360
+    k = _ROT_K.get(rot, 0)
+    if k != 0:
+        img = np.rot90(img, k=k)
+    if flip_h:
+        img = img[:, ::-1]
+    if flip_v:
+        img = img[::-1, :]
+    if not img.flags["C_CONTIGUOUS"]:
+        img = np.ascontiguousarray(img)
+    return img
 
 
 # ----------------------------------------------------------------------------
@@ -245,6 +271,10 @@ def process(
     if not np.all(np.isfinite(img)):
         img = np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
     img = np.clip(img, 0.0, None)
+
+    # --- Geometry: rotation / mirror (must come first; downstream stages
+    #     and local masks all operate in this user-facing frame) -----------
+    img = _apply_transform(img, p["rotation"], p["flip_h"], p["flip_v"])
 
     # --- Linear-space stages -----------------------------------------------
     img = adj.exposure(img, p["exposure"])

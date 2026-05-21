@@ -115,6 +115,38 @@ h1, h2, h3, p { margin: 0; }
 }
 .btn-mini:hover { background: var(--bg-4); border-color: var(--line-2); }
 
+.transform-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 0 4px;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  margin: 0 4px;
+  height: 32px;
+  align-items: center;
+}
+
+.btn-icon {
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.1s, border-color 0.1s, opacity 0.1s;
+}
+.btn-icon:hover:not(:disabled) { background: var(--bg-3); border-color: var(--line); }
+.btn-icon:active { background: var(--bg-4); }
+.btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-icon.active { background: rgba(79, 158, 255, 0.18); border-color: var(--accent); color: var(--accent); }
+
 .export-group { display: flex; border-radius: 6px; overflow: hidden; }
 
 .select-mini {

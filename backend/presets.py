@@ -35,6 +35,9 @@ from typing import Any, Dict, List
 def default_params() -> Dict[str, Any]:
     """Identity defaults — pipeline becomes near-no-op."""
     return {
+        "rotation": 0,
+        "flip_h": False,
+        "flip_v": False,
         "exposure": 0.0,
         "highlights": 0,
         "whites": 0,

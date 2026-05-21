@@ -89,7 +89,7 @@ def load_raw(
             demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
             half_size=half_size,
             highlight_mode=rawpy.HighlightMode.Clip,
-            user_flip=0,  # honor in-file orientation via postprocess default
+            user_flip=-1,  # -1 = honor camera-flagged EXIF orientation
         )
 
     linear = rgb16.astype(np.float32) / 65535.0
