@@ -53,30 +53,50 @@ def _smooth_mask(luma: np.ndarray, threshold: float, feather_px: float) -> np.nd
 
 
 def _knee_curve(x: np.ndarray, knee: float, strength: float) -> np.ndarray:
-    """Smooth tone-curve compression above ``knee``.
+    """Soft highlight compression above ``knee`` — output is always ≤ input.
 
-    Below knee: identity. Above knee: exponential roll-off that
-    asymptotes to 1. ``strength`` in [0, 1] controls how aggressively
-    we pull the top end down (0 = identity, 1 = maximum compression).
+    Below the knee the curve is the identity. Above the knee it pulls
+    bright values toward (but never past) 1.0 along a rational
+    concave function that has ``y' = 1`` at the knee point, so there
+    is no visible seam where compression begins.
+
+    The formula is ``y = knee + (1 - knee) * t / (1 + a*t)`` with
+    ``t = (x - knee) / (1 - knee)`` and ``a = 8 * strength``.
+
+    Why this and not ``(1 - exp(-k*t)) / (1 - exp(-k))`` (the previous
+    formulation): that normalized exponential, although it looks like
+    a "soft saturation" curve, actually maps the knee endpoint (x=1)
+    back to 1 by construction and bows ABOVE the y=x identity in
+    between — i.e. it brightens highlights instead of darkening them.
+    The rational form below stays strictly below identity:
+
+        d/dt [knee + (1-knee)*t/(1+a*t)] = (1-knee) / (1+a*t)^2
+
+    which is ≤ (1 - knee) for a, t ≥ 0; integrated from knee that
+    keeps the curve ≤ x. Proof: ``t/(1+a*t) ≤ t ↔ 0 ≤ a t²``.
+
+    Parameters
+    ----------
+    knee : float in [0, 0.99]
+        Where compression begins.
+    strength : float in [0, 1]
+        At 0 the curve is the identity. At 1 an input of x=1 is pulled
+        down to roughly ``knee + 0.11 * (1-knee)`` (~78% of the way
+        toward the knee — strong but not crushing).
     """
     knee = float(np.clip(knee, 0.0, 0.99))
     strength = float(np.clip(strength, 0.0, 1.0))
     if strength <= 1e-6:
         return x.copy()
 
-    # Compression coefficient. Higher k = stronger pull-down.
-    k = 1.0 + strength * 14.0
-
-    below = x <= knee
-    above = ~below
     out = x.copy()
-
+    above = x > knee
     if above.any():
-        t = (x[above] - knee) / max(1e-6, 1.0 - knee)  # 0..1+
-        # Smooth roll-off: 1 - exp(-k*t) normalized so a value of 1
-        # at the original "white" maps to exactly 1.
-        norm = 1.0 - np.exp(-k)
-        compressed = (1.0 - np.exp(-k * t)) / max(1e-6, norm)
+        t = (x[above] - knee) / max(1.0 - knee, 1e-6)
+        t = np.maximum(t, 0.0)
+        a = 8.0 * strength
+        compressed = t / (1.0 + a * t)
+        compressed = np.minimum(compressed, 1.0)  # safety cap for x ≫ 1
         out[above] = knee + (1.0 - knee) * compressed
     return out
 
@@ -278,19 +298,29 @@ def filmic_curve(
     threshold: float = 0.65,
     contrast: float = 0.05,
 ) -> np.ndarray:
-    """Filmic log-roll-off curve. Smooth, no clipping, cinematic feel.
+    """Filmic / shoulder-style highlight roll-off.
 
-    Maps linear value v -> threshold + (1 - threshold) * (1 - 1/(1+a*(v-threshold)^p))
+    Same rational compression as ``_knee_curve`` but with an optional
+    ``t^p`` shoulder (controlled by ``contrast``) that delays the onset
+    of compression slightly so midtones stay snappy while the highlights
+    saturate softly — the visual signature of motion-picture print film.
+
+    Always strictly compressing (output ≤ input above the threshold).
     """
-    a = 1.0 + strength * 10.0
-    p = 1.2 + contrast * 1.5
+    if strength <= 1e-6:
+        return rgb.copy()
+
+    a = 6.0 * strength
+    p = 1.0 + float(np.clip(contrast, 0.0, 1.0)) * 0.6
 
     out = rgb.copy()
     above = rgb > threshold
     if above.any():
-        t = (rgb[above] - threshold) / max(1e-6, 1.0 - threshold)
+        t = (rgb[above] - threshold) / max(1.0 - threshold, 1e-6)
         t = np.maximum(t, 0.0)
-        compressed = 1.0 - 1.0 / (1.0 + a * (t ** p))
+        u = np.power(t, p)
+        compressed = u / (1.0 + a * u)
+        compressed = np.minimum(compressed, 1.0)
         out[above] = threshold + (1.0 - threshold) * compressed
     return np.clip(out, 0.0, 1.0).astype(np.float32)
 

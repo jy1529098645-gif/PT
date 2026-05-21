@@ -1,31 +1,24 @@
-"""Built-in presets covering highlight recovery + iPhone-style edits.
+"""Built-in presets — professional, restrained values.
 
-Each preset is a full parameter set the pipeline can apply directly.
-Parameters omitted from a preset fall back to ``default_params``.
+Design principles drawn from Lightroom / Capture One / darktable / RawTherapee
+defaults and from feedback that earlier presets caused "image distortion":
 
-User-facing parameter scales:
-    exposure          - EV, [-2.0, +2.0]
-    highlights        - [-100, +100], negative = pull down
-    whites            - [-100, +100]
-    shadows           - [-100, +100], positive = lift
-    black_point       - [-100, +100], positive = lift blacks
-    brightness        - [-100, +100], midtone gamma
-    brilliance        - [-100, +100], Apple-style adaptive
-    contrast          - [-100, +100], S-curve
-    warmth            - [-100, +100], positive = warmer
-    tint              - [-100, +100], positive = magenta
-    saturation        - [-100, +100]
-    vibrance          - [-100, +100], selective sat
-    definition        - [-100, +100], clarity (midtone local-contrast)
-    sharpness         - [0, 100]
-    noise_reduction   - [0, 100]
-    vignette          - [-100, +100], negative = darken edges
-    threshold         - [0, 100], highlight recovery start
-    smoothness        - [0, 100], mask feather
-    color_preservation- [0, 100]
-    local_contrast    - [-100, +100], for detail_preserving / filmic
-    saturation_recovery - [0, 100]
-    method            - recovery algorithm key
+1. **Single dominant operation per preset.** Stacking strong highlight
+   recovery + heavy shadow lift + strong clarity + heavy vibrance produces
+   the unmistakable "fake HDR" look. Each preset here pushes one tool hard
+   and uses the rest only to support.
+2. **Conservative highlight strengths.** Real-world Lightroom auto sits at
+   highlights ≈ -25 .. -50, not -80. Going past -65 is rare and looks
+   artificial on most scenes.
+3. **High color preservation (80–95).** Keeps highlight hue stable so skies
+   stay blue, skin stays warm, fabric stays white.
+4. **No exposure_fusion / Mertens in stock presets.** Multi-exposure fusion
+   is inherently HDR-looking; users who specifically want that can switch
+   to it manually.
+5. **Modest definition / sharpness.** Definition > 25 starts making fabrics
+   and skin look "digital"; sharpness > 20 starts ringing on edges.
+6. **No simultaneous heavy contrast + clarity + vibrance.** Two of three at
+   most, at modest values.
 """
 from __future__ import annotations
 
@@ -33,7 +26,7 @@ from typing import Any, Dict, List
 
 
 def default_params() -> Dict[str, Any]:
-    """Identity defaults — pipeline becomes near-no-op."""
+    """Identity defaults — pipeline becomes a near no-op."""
     return {
         "rotation": 0,
         "flip_h": False,
@@ -55,8 +48,8 @@ def default_params() -> Dict[str, Any]:
         "noise_reduction": 0,
         "vignette": 0,
         "threshold": 75,
-        "smoothness": 20,
-        "color_preservation": 75,
+        "smoothness": 25,
+        "color_preservation": 85,
         "local_contrast": 0,
         "saturation_recovery": 0,
         "method": "luminance_mask",
@@ -65,162 +58,177 @@ def default_params() -> Dict[str, Any]:
 
 
 PRESETS: Dict[str, Dict[str, Any]] = {
-    # ----- highlight-recovery focused -------------------------------------
+    # =========================================================================
+    # Recovery presets — primary purpose is highlight rescue.
+    # =========================================================================
     "natural_subtle": {
-        "name": "自然微调",
-        "description": "轻度高光压缩，保留自然观感。日常照片首选。",
+        "name": "柔和恢复",
+        "description": "日常照片首选。轻度高光压缩 + 微调阴影，保留自然观感。",
         "params": {
-            "highlights": -30, "whites": -10, "shadows": 5,
-            "threshold": 75, "smoothness": 25, "color_preservation": 75,
-            "saturation_recovery": 10, "method": "luminance_mask",
+            "highlights": -25,
+            "whites": -8,
+            "shadows": 5,
             "vibrance": 8,
+            "color_preservation": 85,
+            "smoothness": 25,
+            "method": "luminance_mask",
         },
     },
     "strong_recovery": {
         "name": "强力恢复",
-        "description": "大幅压暗高光，挽回严重过曝。",
+        "description": "严重过曝救场。中等强度压缩 + 保色，避免人造 HDR 感。",
         "params": {
-            "exposure": -0.3, "highlights": -80, "whites": -40, "shadows": 15,
-            "threshold": 55, "smoothness": 30, "color_preservation": 85,
-            "local_contrast": 30, "saturation_recovery": 20,
-            "method": "channel_aware",
-            "vibrance": 12, "definition": 15,
+            "exposure": -0.15,
+            "highlights": -55,
+            "whites": -20,
+            "shadows": 10,
+            "vibrance": 5,
+            "color_preservation": 90,
+            "smoothness": 30,
+            "method": "luminance_mask",
         },
     },
     "sky_blue": {
-        "name": "天空恢复",
-        "description": "针对过曝天空：恢复云层细节与蓝调。",
+        "name": "天空云层",
+        "description": "针对过曝天空：HSL 模式锁色相，找回云层蓝调。",
         "params": {
-            "exposure": -0.2, "highlights": -70, "whites": -30,
-            "threshold": 60, "smoothness": 25, "color_preservation": 95,
-            "saturation_recovery": 25, "method": "luminance_mask",
-            "vibrance": 20, "warmth": -8, "saturation": 8,
+            "highlights": -45,
+            "whites": -15,
+            "vibrance": 15,
+            "warmth": -3,
+            "color_preservation": 95,
+            "smoothness": 28,
+            "method": "hsl_compression",
+            "saturation_recovery": 10,
+        },
+    },
+    "sunset_warm": {
+        "name": "日落暖光",
+        "description": "日落、霓虹等单通道过曝。通道感知保住色温，避免发紫。",
+        "params": {
+            "highlights": -40,
+            "whites": -12,
+            "vibrance": 12,
+            "warmth": 5,
+            "color_preservation": 90,
+            "method": "channel_aware",
         },
     },
     "portrait_skin": {
         "name": "人像高光",
-        "description": "保护皮肤高光与色相。",
+        "description": "保护肤色与高光过渡。HSL 锁色相，弱化清晰度避免数码感。",
         "params": {
-            "highlights": -40, "whites": -15, "shadows": 8,
-            "threshold": 78, "smoothness": 22, "color_preservation": 90,
+            "highlights": -30,
+            "whites": -10,
+            "shadows": 5,
+            "vibrance": 8,
+            "warmth": 3,
+            "definition": -5,
+            "sharpness": 12,
+            "color_preservation": 90,
             "method": "hsl_compression",
-            "warmth": 5, "vibrance": 10, "definition": -8, "sharpness": 25,
         },
     },
     "wedding_whites": {
         "name": "婚纱白色",
-        "description": "找回白色衣物的褶皱与质感。",
+        "description": "找回白色衣物的褶皱与质感。中度细节增强，不过度。",
         "params": {
-            "exposure": -0.1, "highlights": -65, "whites": -25, "shadows": 10,
-            "threshold": 70, "smoothness": 18, "color_preservation": 60,
-            "local_contrast": 45, "method": "detail_preserving",
-            "definition": 25, "sharpness": 30,
+            "highlights": -45,
+            "whites": -15,
+            "shadows": 5,
+            "definition": 12,
+            "sharpness": 10,
+            "local_contrast": 25,
+            "color_preservation": 65,
+            "smoothness": 22,
+            "method": "detail_preserving",
         },
     },
     "interior_window": {
-        "name": "室内窗外",
-        "description": "极强力恢复：室内拍摄窗户严重过曝。",
+        "name": "室内逆光",
+        "description": "室内拍摄、窗户严重过曝。强压高光，不用 HDR 融合。",
         "params": {
-            "exposure": -0.5, "highlights": -95, "whites": -60, "shadows": 25,
-            "threshold": 50, "smoothness": 35, "color_preservation": 80,
-            "local_contrast": 50, "saturation_recovery": 30,
-            "method": "exposure_fusion",
-            "vibrance": 15, "brilliance": 20,
+            "exposure": -0.15,
+            "highlights": -60,
+            "whites": -25,
+            "shadows": 18,
+            "vibrance": 8,
+            "color_preservation": 88,
+            "smoothness": 30,
+            "method": "luminance_mask",
         },
     },
-    "landscape_hdr": {
-        "name": "风光 HDR",
-        "description": "风光摄影 HDR 风格：天空与阴影平衡。",
+    "landscape_natural": {
+        "name": "风光自然",
+        "description": "风光摄影：天空与阴影平衡，不过度增强。",
         "params": {
-            "highlights": -75, "whites": -20, "shadows": 30,
-            "threshold": 60, "smoothness": 25, "color_preservation": 85,
-            "local_contrast": 45, "saturation_recovery": 25,
-            "method": "exposure_fusion",
-            "brilliance": 25, "vibrance": 20, "definition": 20, "vignette": -10,
-        },
-    },
-    "cinematic": {
-        "name": "电影感",
-        "description": "胶片质感：柔和高光，低对比，冷调。",
-        "params": {
-            "highlights": -55, "whites": -35, "shadows": 12,
-            "threshold": 65, "smoothness": 30, "color_preservation": 80,
-            "method": "filmic_curve",
-            "contrast": -10, "warmth": -12, "tint": 5, "saturation": -8,
-            "vignette": -15,
-        },
-    },
-    "stage_concert": {
-        "name": "舞台演唱会",
-        "description": "射灯环境：压暗高光，恢复服装细节。",
-        "params": {
-            "exposure": -0.2, "highlights": -85, "whites": -50, "shadows": 35,
-            "threshold": 55, "smoothness": 28, "color_preservation": 75,
-            "local_contrast": 35, "saturation_recovery": 20,
-            "method": "channel_aware",
-            "vibrance": 15, "definition": 20,
-        },
-    },
-    "snow_beach": {
-        "name": "雪景 / 海滩",
-        "description": "高反光环境：找回雪地、沙滩、海面层次。",
-        "params": {
-            "exposure": -0.4, "highlights": -70, "whites": -45,
-            "threshold": 65, "smoothness": 22, "color_preservation": 70,
-            "local_contrast": 25, "saturation_recovery": 15,
-            "method": "detail_preserving",
-            "vibrance": 15, "warmth": 3,
+            "highlights": -42,
+            "whites": -12,
+            "shadows": 15,
+            "vibrance": 12,
+            "definition": 8,
+            "color_preservation": 85,
+            "smoothness": 26,
+            "method": "luminance_mask",
         },
     },
 
-    # ----- iPhone-style look presets --------------------------------------
-    "vivid": {
+    # =========================================================================
+    # Look presets — stylistic, applied after recovery.
+    # =========================================================================
+    "vivid_clean": {
         "name": "鲜明",
-        "description": "iPhone Vivid 风格：高饱和、强对比、增强清晰度。",
+        "description": "增加画面冲击力但不失真。柔和压暗 + 自然饱和 + 适度清晰度。",
         "params": {
-            "highlights": -25, "shadows": 18, "brilliance": 15,
-            "contrast": 22, "vibrance": 30, "saturation": 10,
-            "definition": 18, "sharpness": 20,
+            "highlights": -22,
+            "shadows": 8,
+            "contrast": 12,
+            "vibrance": 18,
+            "definition": 8,
+            "sharpness": 12,
+            "color_preservation": 85,
             "method": "luminance_mask",
         },
     },
-    "vivid_warm": {
-        "name": "鲜明暖色",
-        "description": "iPhone Vivid Warm：暖色调 + 强对比 + 提高鲜明度。",
+    "filmic_soft": {
+        "name": "胶片柔和",
+        "description": "电影质感：柔和高光、低对比、轻微冷调、低饱和。",
         "params": {
-            "highlights": -28, "shadows": 15, "brilliance": 18,
-            "contrast": 18, "vibrance": 25, "saturation": 8,
-            "warmth": 18, "definition": 15,
-            "method": "luminance_mask",
-        },
-    },
-    "dramatic": {
-        "name": "戏剧",
-        "description": "iPhone Dramatic：高对比、阴影下压、增强氛围。",
-        "params": {
-            "highlights": -45, "shadows": -10, "black_point": -8,
-            "contrast": 28, "vibrance": 15, "saturation": -5,
-            "definition": 22, "vignette": -18,
-            "method": "luminance_mask",
+            "highlights": -38,
+            "whites": -15,
+            "shadows": 8,
+            "contrast": -6,
+            "warmth": -5,
+            "saturation": -5,
+            "color_preservation": 82,
+            "method": "filmic_curve",
         },
     },
     "mono_silver": {
-        "name": "银调黑白",
-        "description": "iPhone Silvertone 风格：黑白片，柔和中间调。",
+        "name": "黑白",
+        "description": "黑白片：保留中间调层次，适度对比。",
         "params": {
-            "highlights": -25, "shadows": 15, "brilliance": 10,
-            "contrast": 12, "saturation": -100,
-            "definition": 12, "sharpness": 18,
+            "highlights": -25,
+            "whites": -10,
+            "shadows": 12,
+            "contrast": 10,
+            "saturation": -100,
+            "definition": 8,
+            "sharpness": 12,
             "method": "luminance_mask",
         },
     },
     "auto_enhance": {
-        "name": "自动增强",
-        "description": "类似 iPhone 「自动」按钮：智能恢复 + 适度提亮 + 微对比。",
+        "name": "自动",
+        "description": "智能增强：iPhone Auto 风格。鲜明度 + 适度恢复 + 自然饱和。",
         "params": {
-            "highlights": -35, "shadows": 20, "black_point": 3,
-            "brilliance": 22, "contrast": 8, "brightness": 5,
-            "vibrance": 18, "definition": 12, "sharpness": 15,
+            "highlights": -25,
+            "shadows": 12,
+            "brilliance": 15,
+            "vibrance": 12,
+            "definition": 5,
+            "sharpness": 10,
+            "color_preservation": 85,
             "method": "luminance_mask",
         },
     },
